@@ -96,7 +96,7 @@ globalThis.labReports = (() => {
       table.variableNames.join(', ') + ' ≥ 0',
       'Базисные переменные: ' + basicNames.join(', '),
     ];
-    if (table.artificial.size) {
+    if (table.artificial?.size) {
       const names = [...table.artificial].map(column => table.variableNames[column]);
       const auxiliaryObjective = linear(names.map(() => one.negate()), names);
       lines.push(`Вспомогательная цель: f(x, w) = ${auxiliaryObjective} → max`);

@@ -1,7 +1,7 @@
 globalThis.labOptimality = (() => {
   const { zero, one, number } = labMath;
   const { parseProblem } = labProblem;
-  const { linear, optimalityReport, response, canonicalForm, tableauSnapshot } = labReports;
+  const { linear, optimalityReport, response } = labReports;
   const limit = 300;
 
   function run(data) {
@@ -121,11 +121,10 @@ globalThis.labOptimality = (() => {
     const equalityBounds = equations.map(row => row[row.length - 1]);
     const dualRelations = model.columns.map(() => model.relation);
     const { table, status } = artificialBasis({
-      objective: parts.map(() => zero),
+      originalWidth: parts.length,
       constraints: [...model.columns, ...equations].map(convertRow),
       bounds: [...problem.objective, ...equalityBounds],
       relations: [...dualRelations, ...equations.map(() => '=')],
-      sense: 'max',
     });
     if (status !== 'optimal') return { status };
 
@@ -224,71 +223,22 @@ globalThis.labOptimality = (() => {
 
   function artificialBasis(problem) {
     const table = createFeasibleTableau(problem);
-    const originalPrices = table.prices.slice();
-
     if (!table.artificial.size) {
-      const status = optimizeFeasibleBasis(table, 'Искусственные переменные не нужны. Начальная таблица');
-      return { table, status };
+      return { table, status: 'optimal' };
     }
 
-    table.prices = table.prices.map((_, column) =>
-      table.artificial.has(column) ? one.negate() : zero,
-    );
-    const phaseOneStatus = optimizeFeasibleBasis(
-      table,
-      'Фаза I: f(x, w) → max',
-      'Все Δ ≥ 0 и δ ≥ 0: фаза I завершена.',
-    );
-    if (phaseOneStatus !== 'optimal') {
+    const status = optimizeFeasibleBasis(table);
+    if (status !== 'optimal') {
       return { table, status: 'limit' };
     }
 
-    const auxiliaryValue = table.objective();
-    if (auxiliaryValue.sign) {
-      table.note('Фаза I завершена', `f(x, w) = ${auxiliaryValue} < 0: допустимого плана нет.`);
-      return { table, status: 'infeasible' };
-    }
-
-    let row = 0;
-    while (row < table.basic.length) {
-      const current = table.basic[row];
-      if (table.artificial.has(current)) {
-        const candidates = table.nonbasic.filter(column =>
-          !table.artificial.has(column) && table.matrix[row][column].sign !== 0,
-        );
-        const entering = candidates.sort((first, second) => first - second)[0];
-
-        if (entering === undefined) {
-          const originalRowNumber = table.originalRows[row] + 1;
-          table.note(
-            `Удаляем зависимое ограничение №${originalRowNumber}`,
-            'Строка нулевая по настоящим переменным.',
-          );
-          table.dropRow(row);
-          continue;
-        }
-        const leavingName = table.variableNames[current];
-        const enteringName = table.variableNames[entering];
-
-        table.exchange(row, entering);
-        table.record(
-          `Убираем ${leavingName} из базиса`,
-          `${leavingName} заменяется на ${enteringName}.`,
-        );
-      }
-      row += 1;
-    }
-
-    table.finishPhaseOne(originalPrices);
-    const status = optimizeFeasibleBasis(table, 'Фаза II: таблица без W, Δ по исходной целевой функции');
-    return { table, status };
+    return {
+      table,
+      status: table.objective().sign ? 'infeasible' : 'optimal',
+    };
   }
 
-  function optimizeFeasibleBasis(
-    table,
-    title = 'Начальная таблица',
-    finalNote = 'Все Δ ≥ 0 и δ ≥ 0: решение найдено.',
-  ) {
+  function optimizeFeasibleBasis(table) {
     if (table.right.some(value => value.sign < 0)) {
       throw new Error('Для прямого симплекса нужен допустимый начальный план.');
     }
@@ -303,7 +253,6 @@ globalThis.labOptimality = (() => {
       );
 
       if (!enteringOptions.length) {
-        table.record(title, finalNote);
         return 'optimal';
       }
       if (iteration === limit) break;
@@ -311,7 +260,6 @@ globalThis.labOptimality = (() => {
       const key = table.basic.slice().sort((first, second) => first - second).join(',');
       if (!useBland && visited.has(key)) {
         useBland = true;
-        table.note('Переход к правилу Бланда', 'Базис повторился. Дальше выбираем по индексам.');
       }
       visited.add(key);
 
@@ -321,7 +269,6 @@ globalThis.labOptimality = (() => {
       });
 
       const entering = enteringOptions[0];
-      const enteringName = table.variableNames[entering];
       const ratios = table.matrix.map((row, index) => {
         const coefficient = row[entering];
         return coefficient.sign > 0 ? table.right[index].over(coefficient) : null;
@@ -335,9 +282,6 @@ globalThis.labOptimality = (() => {
       }
 
       if (!leavingOptions.length) {
-        const explanation =
-          `В столбце ${enteringName} нет положительных элементов: целевая функция не ограничена.`;
-        table.record(title, explanation, { columnRatios: ratios });
         return 'unbounded';
       }
 
@@ -347,23 +291,9 @@ globalThis.labOptimality = (() => {
       });
 
       const leaving = leavingOptions[0];
-      const leavingName = table.variableNames[table.basic[leaving]];
-      const pivot = table.matrix[leaving][entering];
-      const reason = useBland ? 'правило Бланда' : `наименьшая Δ = ${estimates[entering]}`;
-      const explanation =
-        `Ведущий столбец ${enteringName} (${reason}). ` +
-        `Ведущая строка ${leavingName} (min δ/a = ${ratios[leaving]}). ` +
-        `Ведущий элемент ${pivot}.`;
-
-      table.record(title, explanation, {
-        columnRatios: ratios,
-        pivot: [leaving, entering],
-      });
       table.exchange(leaving, entering);
-      title = `Пересчёт: ${enteringName} ↔ ${leavingName}`;
     }
 
-    table.record(title, 'Достигнут предел пересчётов.');
     return 'limit';
   }
 
@@ -371,19 +301,14 @@ globalThis.labOptimality = (() => {
 
   class Tableau {
     constructor({
-      matrix, right, prices, variableNames, basic, artificial,
+      matrix, right, prices, basic, artificial,
     }) {
       this.matrix = matrix;
       this.right = right;
       this.prices = prices;
-      this.variableNames = variableNames;
       this.basic = basic;
       this.nonbasic = indices(prices.length).filter(column => !basic.includes(column));
       this.artificial = artificial;
-
-      this.originalRows = indices(right.length);
-      this.steps = [];
-      this.canonical = canonicalForm(this);
     }
 
     basicPrices() {
@@ -401,16 +326,6 @@ globalThis.labOptimality = (() => {
 
     objective() {
       return dot(this.basicPrices(), this.right);
-    }
-
-    note(title, explanation) {
-      this.steps.push({ title, explanation });
-    }
-
-    record(title, explanation, options = {}) {
-      const estimates = this.estimates();
-      const value = this.objective();
-      this.steps.push(tableauSnapshot(this, title, explanation, estimates, value, options));
     }
 
     exchange(leavingRow, enteringColumn) {
@@ -449,36 +364,12 @@ globalThis.labOptimality = (() => {
       }
       return point;
     }
-
-    dropRow(index) {
-      this.matrix.splice(index, 1);
-      this.right.splice(index, 1);
-      this.basic.splice(index, 1);
-      this.originalRows.splice(index, 1);
-    }
-
-    finishPhaseOne(originalPrices) {
-      const kept = indices(this.prices.length).filter(column => !this.artificial.has(column));
-      const positions = new Map(kept.map((column, index) => [column, index]));
-
-      this.matrix = this.matrix.map(row => kept.map(column => row[column]));
-      this.prices = kept.map(column => originalPrices[column]);
-      this.variableNames = kept.map(column => this.variableNames[column]);
-
-      this.basic = this.basic.map(column => positions.get(column));
-      this.nonbasic = this.nonbasic
-        .filter(column => positions.has(column))
-        .map(column => positions.get(column));
-      this.artificial.clear();
-    }
   }
 
   function createFeasibleTableau(problem) {
-    const { objective, constraints, bounds, relations, sense } = problem;
+    const { originalWidth, constraints, bounds, relations } = problem;
     const rowCount = bounds.length;
-    const originalWidth = objective.length;
-    const variableNames = objective.map((_, column) => `x${column + 1}`);
-    const prices = objective.map(value => sense === 'max' ? value : value.negate());
+    const prices = Array(originalWidth).fill(zero);
     const basic = bounds.map(() => -1);
 
     const rowSigns = bounds.map(value => value.sign < 0 ? one.negate() : one);
@@ -487,10 +378,9 @@ globalThis.labOptimality = (() => {
 
     const artificial = new Set();
 
-    function appendColumn(name, rowIndex, entry) {
-      const column = variableNames.length;
-      variableNames.push(name);
-      prices.push(zero);
+    function appendColumn(rowIndex, entry, price = zero) {
+      const column = prices.length;
+      prices.push(price);
       matrix.forEach((row, index) => row.push(index === rowIndex ? entry : zero));
       return column;
     }
@@ -499,9 +389,8 @@ globalThis.labOptimality = (() => {
       const sign = rowSigns[rowIndex].sign < 0 ? flipped[relation] : relation;
       if (sign === '=') continue;
 
-      const name = `x${variableNames.length + 1}`;
       const coefficient = sign === '<=' ? one : one.negate();
-      const column = appendColumn(name, rowIndex, coefficient);
+      const column = appendColumn(rowIndex, coefficient);
       if (sign === '<=') basic[rowIndex] = column;
     }
 
@@ -523,13 +412,13 @@ globalThis.labOptimality = (() => {
 
       if (basic[row] !== -1) continue;
 
-      const column = appendColumn(`W${artificial.size + 1}`, row, one);
+      const column = appendColumn(row, one, one.negate());
       basic[row] = column;
       artificial.add(column);
     }
 
     return new Tableau({
-      matrix, right, prices, variableNames, basic, artificial,
+      matrix, right, prices, basic, artificial,
     });
   }
 

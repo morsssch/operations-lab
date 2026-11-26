@@ -46,7 +46,9 @@ test('каждая вкладка запускается без файлов о�
     for (const index of [0, 1, 2]) {
       const data = labExamples.example(method, index);
       const run = isolated[globalName].run;
-      if (method === 'transport' && index === 2) {
+      if (method === 'simplex' && index === 2) {
+        assert.throws(() => run(data), /допустимый начальный план/);
+      } else if (method === 'transport' && index === 2) {
         assert.throws(() => run(data), /не могут быть отрицательными/);
       } else {
         assert.equal(JSON.stringify(run(data)), JSON.stringify(example(method, index)));
@@ -61,7 +63,11 @@ test('прямой симплекс сохраняет итоговую табл
   assert.equal(answer.value, '10');
   assert.match(answer.export, /δ = \(2; 2; 1\)/);
   assert.match(answer.export, /Δ = \(1; 2\)/);
-  assert.equal(example('simplex', 2).status, 'infeasible');
+  assert.throws(() => example('simplex', 2), /допустимый начальный план/);
+  assert.throws(
+    () => solve('simplex', [1, 2], [[1, 1], [1, 2]], [4, 5], ['=', '=']),
+    /Не удалось построить начальный базис/,
+  );
 });
 
 test('симплекс на исходной задаче из разбора контрольной', () => {

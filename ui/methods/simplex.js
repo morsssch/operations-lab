@@ -18,30 +18,17 @@ globalThis.labSimplex = (() => {
   }
 
   function solveFromInitialTableau(problem) {
-    let table = createTableau(problem);
-    let status;
-    const route = [];
-
-    if (table?.right.every(value => value.sign >= 0)) {
-      route.push('Прямой симплекс');
-      status = primalSimplex(table);
-    } else if (table?.estimates().every(value => value.sign >= 0)) {
-      route.push('Начальный план недопустим → двойственный симплекс');
-      status = restorePrimalFeasibility(table);
-    } else {
-      route.push('Нет подходящего допустимого базиса → МИБ');
-      route.push('МИБ (фаза I → фаза II)');
-      ({ table, status } = artificialBasis(problem));
+    const table = createTableau(problem);
+    if (!table) {
+      throw new Error('Не удалось построить начальный базис из имеющихся столбцов.');
     }
 
-    return linearResult(problem, table, status, route);
+    const status = primalSimplex(table);
+    return linearResult(problem, table, status, ['Прямой симплекс']);
   }
 
-  function primalSimplex(
-    table,
-    title = 'Начальная таблица',
-    finalNote = 'Все Δ ≥ 0 и δ ≥ 0: решение найдено.',
-  ) {
+  function primalSimplex(table) {
+    let title = 'Начальная таблица';
     if (table.right.some(value => value.sign < 0)) {
       throw new Error('Для прямого симплекса нужен допустимый начальный план.');
     }
@@ -52,11 +39,11 @@ globalThis.labSimplex = (() => {
     for (let iteration = 0; iteration <= limit; iteration += 1) {
       const estimates = table.estimates();
       const enteringOptions = table.nonbasic.filter(column =>
-        !table.artificial.has(column) && estimates[column].sign < 0,
+        estimates[column].sign < 0,
       );
 
       if (!enteringOptions.length) {
-        table.record(title, finalNote);
+        table.record(title, 'Все Δ ≥ 0 и δ ≥ 0: решение найдено.');
         return 'optimal';
       }
       if (iteration === limit) break;
@@ -120,153 +107,11 @@ globalThis.labSimplex = (() => {
     return 'limit';
   }
 
-  function restorePrimalFeasibility(table, title = 'Начальная таблица') {
-    if (table.estimates().some(value => value.sign < 0)) {
-      throw new Error('Для двойственного симплекса необходимы Δj ≥ 0.');
-    }
-
-    const visited = new Set();
-    let useBland = false;
-
-    for (let iteration = 0; iteration <= limit; iteration += 1) {
-      const leavingOptions = [];
-      for (const [row, rightPart] of table.right.entries()) {
-        if (rightPart.sign < 0) {
-          leavingOptions.push(row);
-        }
-      }
-
-      if (!leavingOptions.length) {
-        table.record(title, 'Все δ ≥ 0 и Δ ≥ 0: решение найдено.');
-        return 'optimal';
-      }
-      if (iteration === limit) break;
-
-      const key = table.basic.slice().sort((first, second) => first - second).join(',');
-      if (!useBland && visited.has(key)) {
-        useBland = true;
-        table.note('Переход к правилу Бланда', 'Базис повторился. Дальше выбираем по индексам.');
-      }
-      visited.add(key);
-
-      leavingOptions.sort((first, second) => {
-        const byRightPart = useBland ? 0 : table.right[first].compare(table.right[second]);
-        return byRightPart || table.basic[first] - table.basic[second];
-      });
-
-      const leaving = leavingOptions[0];
-      const leavingName = table.variableNames[table.basic[leaving]];
-      const estimates = table.estimates();
-      const ratios = new Map();
-
-      for (const column of table.nonbasic) {
-        const entry = table.matrix[leaving][column];
-        if (entry.sign < 0) {
-          ratios.set(column, estimates[column].over(entry));
-        }
-      }
-
-      if (!ratios.size) {
-        const explanation =
-          `В строке ${leavingName} (δ < 0) нет отрицательных элементов: ограничения несовместны.`;
-        table.record(title, explanation, { rowRatios: ratios });
-        return 'infeasible';
-      }
-
-      const enteringOptions = [...ratios.keys()];
-      enteringOptions.sort((first, second) => {
-        const byRatioDescending = ratios.get(second).compare(ratios.get(first));
-        return byRatioDescending || first - second;
-      });
-
-      const entering = enteringOptions[0];
-      const enteringName = table.variableNames[entering];
-      const pivot = table.matrix[leaving][entering];
-      const reason = useBland ? 'правило Бланда' : `наименьшая δ = ${table.right[leaving]}`;
-      const explanation =
-        `Ведущая строка ${leavingName} (${reason}). ` +
-        `Ведущий столбец ${enteringName} (max Δ/a = ${ratios.get(entering)}). ` +
-        `Ведущий элемент ${pivot}.`;
-
-      table.record(title, explanation, {
-        rowRatios: ratios,
-        pivot: [leaving, entering],
-      });
-      table.exchange(leaving, entering);
-      title = `Пересчёт: ${enteringName} ↔ ${leavingName}`;
-    }
-
-    table.record(title, 'Достигнут предел пересчётов.');
-    return 'limit';
-  }
-
-  function artificialBasis(problem) {
-    const table = createTableau(problem, { feasibleStart: true });
-    const originalPrices = table.prices.slice();
-
-    if (!table.artificial.size) {
-      const status = primalSimplex(table, 'Искусственные переменные не нужны. Начальная таблица');
-      return { table, status };
-    }
-
-    table.prices = table.prices.map((_, column) =>
-      table.artificial.has(column) ? one.negate() : zero,
-    );
-    const phaseOneStatus = primalSimplex(
-      table,
-      'Фаза I: f(x, w) → max',
-      'Все Δ ≥ 0 и δ ≥ 0: фаза I завершена.',
-    );
-    if (phaseOneStatus !== 'optimal') {
-      return { table, status: 'limit' };
-    }
-
-    const auxiliaryValue = table.objective();
-    if (auxiliaryValue.sign) {
-      table.note('Фаза I завершена', `f(x, w) = ${auxiliaryValue} < 0: допустимого плана нет.`);
-      return { table, status: 'infeasible' };
-    }
-
-    let row = 0;
-    while (row < table.basic.length) {
-      const current = table.basic[row];
-      if (table.artificial.has(current)) {
-        const candidates = table.nonbasic.filter(column =>
-          !table.artificial.has(column) && table.matrix[row][column].sign !== 0,
-        );
-        const entering = candidates.sort((first, second) => first - second)[0];
-
-        if (entering === undefined) {
-          const originalRowNumber = table.originalRows[row] + 1;
-          table.note(
-            `Удаляем зависимое ограничение №${originalRowNumber}`,
-            'Строка нулевая по настоящим переменным.',
-          );
-          table.dropRow(row);
-          continue;
-        }
-        const leavingName = table.variableNames[current];
-        const enteringName = table.variableNames[entering];
-
-        table.exchange(row, entering);
-        table.record(
-          `Убираем ${leavingName} из базиса`,
-          `${leavingName} заменяется на ${enteringName}.`,
-        );
-      }
-      row += 1;
-    }
-
-    table.finishPhaseOne(originalPrices);
-    const status = primalSimplex(table, 'Фаза II: таблица без W, Δ по исходной целевой функции');
-    return { table, status };
-  }
-
   const flipped = { '<=': '>=', '>=': '<=', '=': '=' };
 
   class Tableau {
     constructor({
-      matrix, right, prices, variableNames, basic, artificial, constant,
+      matrix, right, prices, variableNames, basic,
     }) {
       this.matrix = matrix;
       this.right = right;
@@ -274,10 +119,7 @@ globalThis.labSimplex = (() => {
       this.variableNames = variableNames;
       this.basic = basic;
       this.nonbasic = indices(prices.length).filter(column => !basic.includes(column));
-      this.artificial = artificial;
-      this.constant = constant;
 
-      this.originalRows = indices(right.length);
       this.steps = [];
       this.canonical = canonicalForm(this);
     }
@@ -296,7 +138,7 @@ globalThis.labSimplex = (() => {
     }
 
     objective() {
-      return dot(this.basicPrices(), this.right).plus(this.constant);
+      return dot(this.basicPrices(), this.right);
     }
 
     note(title, explanation) {
@@ -345,41 +187,17 @@ globalThis.labSimplex = (() => {
       }
       return point;
     }
-
-    dropRow(index) {
-      this.matrix.splice(index, 1);
-      this.right.splice(index, 1);
-      this.basic.splice(index, 1);
-      this.originalRows.splice(index, 1);
-    }
-
-    finishPhaseOne(originalPrices) {
-      const kept = indices(this.prices.length).filter(column => !this.artificial.has(column));
-      const positions = new Map(kept.map((column, index) => [column, index]));
-
-      this.matrix = this.matrix.map(row => kept.map(column => row[column]));
-      this.prices = kept.map(column => originalPrices[column]);
-      this.variableNames = kept.map(column => this.variableNames[column]);
-
-      this.basic = this.basic.map(column => positions.get(column));
-      this.nonbasic = this.nonbasic
-        .filter(column => positions.has(column))
-        .map(column => positions.get(column));
-      this.artificial.clear();
-    }
   }
 
-  function createTableau(problem, { feasibleStart = false } = {}) {
+  function createTableau(problem) {
     const { objective, constraints, bounds, relations, sense } = problem;
     const rowCount = bounds.length;
     const originalWidth = objective.length;
-    const variableNames = problem.variableNames?.slice()
-      ?? objective.map((_, column) => `x${column + 1}`);
+    const variableNames = objective.map((_, column) => `x${column + 1}`);
     const prices = objective.map(value => sense === 'max' ? value : value.negate());
     const basic = bounds.map(() => -1);
 
     const rowSigns = relations.map((relation, rowIndex) => {
-      if (feasibleStart) return bounds[rowIndex].sign < 0 ? one.negate() : one;
       if (relation === '>=') return one.negate();
       if (relation !== '=') return one;
 
@@ -396,8 +214,6 @@ globalThis.labSimplex = (() => {
     });
     const matrix = constraints.map((row, index) => row.map(value => value.times(rowSigns[index])));
     const right = bounds.map((value, index) => value.times(rowSigns[index]));
-
-    const artificial = new Set();
 
     function appendColumn(name, rowIndex, entry) {
       const column = variableNames.length;
@@ -433,18 +249,10 @@ globalThis.labSimplex = (() => {
         break;
       }
 
-      if (basic[row] !== -1) continue;
-      if (!feasibleStart) return null;
-
-      const column = appendColumn(`W${artificial.size + 1}`, row, one);
-      basic[row] = column;
-      artificial.add(column);
+      if (basic[row] === -1) return null;
     }
 
-    return new Tableau({
-      matrix, right, prices, variableNames, basic, artificial,
-      constant: problem.constant ?? zero,
-    });
+    return new Tableau({ matrix, right, prices, variableNames, basic });
   }
 
   function linearResult(problem, table, status, route) {
