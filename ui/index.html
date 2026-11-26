@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Исследование операций</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; font-src 'self' file:; img-src 'self' file:">
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="vendor/katex/katex.min.js"></script>
+  <script defer src="examples.js"></script>
+  <script defer src="forms.js"></script>
+  <script defer src="tables.js"></script>
+  <script defer src="report.js"></script>
+  <script defer src="methods/shared/fractions.js"></script>
+  <script defer src="methods/shared/problem.js"></script>
+  <script defer src="methods/shared/reports.js"></script>
+  <script defer src="methods/simplex.js"></script>
+  <script defer src="methods/dual-simplex.js"></script>
+  <script defer src="methods/artificial-basis.js"></script>
+  <script defer src="methods/optimality.js"></script>
+  <script defer src="methods/primal-dual.js"></script>
+  <script defer src="methods/transport.js"></script>
+  <script defer src="methods/stability.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="identity">
+      <span class="mark" aria-hidden="true"><img src="vendor/lucide/sigma.svg" alt=""></span>
+      <strong>Исследование<br> операций</strong>
+    </div>
+    <nav id="methods" aria-label="Методы решения"></nav>
+  </aside>
+  <main>
+    <header class="page-header">
+      <h1 id="title"></h1>
+      <div class="segments view-switch" id="view-switch" role="group" aria-label="Режим просмотра">
+        <button type="button" data-view="split" aria-controls="editor solution" aria-pressed="true">Обе панели</button>
+        <button type="button" data-view="editor" aria-controls="editor solution" aria-pressed="false">Условие</button>
+        <button type="button" data-view="solution" aria-controls="editor solution" aria-pressed="false">Решение</button>
+      </div>
+    </header>
+    <p class="sr-only" id="announcement" role="status"></p>
+    <div class="workspace" data-view="split">
+      <form id="editor" class="panel">
+        <header class="panel-header">
+          <h2>Условие</h2>
+          <div class="actions">
+            <div class="examples">
+              <span id="examples-label">Примеры</span>
+              <div class="segments" id="examples" role="group" aria-labelledby="examples-label"></div>
+            </div>
+            <button id="clear" type="button">Очистить</button>
+          </div>
+        </header>
+        <div class="form-content" id="form-content">
+          <div id="options"></div>
+          <div id="dimensions"></div>
+          <div id="matrix"></div>
+          <p class="hint" id="hint" hidden></p>
+        </div>
+        <footer class="editor-footer">
+          <p id="error" role="alert" hidden></p>
+          <button class="primary" id="solve" type="submit">Решить</button>
+        </footer>
+      </form>
+      <section class="panel result" id="solution" aria-labelledby="result-title">
+        <header class="panel-header">
+          <h2 id="result-title">Решение</h2>
+          <div class="actions">
+            <button id="copy" type="button" disabled>Копировать</button>
+            <button id="save" type="button" disabled>Сохранить .txt</button>
+          </div>
+        </header>
+        <div class="result-content" id="result-content" tabindex="0" role="region" aria-label="Содержание решения">
+          <div class="empty" id="empty">
+            <div class="empty-mark" aria-hidden="true"><img src="vendor/lucide/table-2.svg" alt=""></div>
+            <p id="placeholder">Введите условие и нажмите «Решить».</p>
+          </div>
+          <div id="answer" hidden>
+            <div class="summary">
+              <p id="status"></p>
+              <div id="formulas"></div>
+            </div>
+            <details open>
+              <summary>Ход решения</summary>
+              <div id="report"></div>
+            </details>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
